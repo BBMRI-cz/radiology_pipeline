@@ -59,15 +59,21 @@ def parse_dicom_dump(file_path):
         'coil': r'\(0018,1250\).*?\[(.*?)\]'  # Receive Coil Name
     }
 
+    # 1. Preddefinujeme slovník s predvolenými hodnotami
+    metadata = {key: "N/A" for key in patterns.keys()}
+    metadata['file_size'] = 0
+
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-            for key, pattern in patterns.items():
-                match = re.search(pattern, content)
-                metadata[key] = match.group(1).strip() if match else "N/A"
-        metadata['file_size'] = os.path.getsize(file_path)
-    except:
-        pass
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                for key, pattern in patterns.items():
+                    match = re.search(pattern, content)
+                    metadata[key] = match.group(1).strip() if match else "N/A"
+            metadata['file_size'] = os.path.getsize(file_path)
+    except Exception as e:
+        print(f"Chyba pri spracovaní {file_path}: {e}")
+
     return metadata
 
 
