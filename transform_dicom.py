@@ -93,6 +93,7 @@ def process_all_imaging(root_path):
                       'insts': set(), 'date': ""}
 
         for d in dumps:
+            print(f"Spracovávam: {accession} -> {d}")  # Toto pridajte
             data = parse_dicom_dump(os.path.join(folder, d))
             # Plnenie štúdie
             if data['modality'] != "N/A": study_info['modalities'].add(data['modality'])
