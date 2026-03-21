@@ -9,10 +9,10 @@ def check_environment():
 
     # 1. Kontrola knižníc
     try:
-        import openpyxl
-        print("[OK] Knižnice pandas a openpyxl sú dostupné.")
+        import pandas as pd
+        print("[OK] Knižnica pandas je dostupná.")
     except ImportError:
-        print("[ERROR] Chýba knižnica 'openpyxl'. Nainštalujte ju: pip install openpyxl")
+        print("[ERROR] Chýba knižnica 'pandas'. Nainštalujte ju: pip install pandas")
         sys.exit(1)
 
     # 2. Test zápisu v aktuálnom priečinku
@@ -111,13 +111,9 @@ def process_all_imaging(root_path):
 
     print(f"Nájdených {total_folders} zložiek na spracovanie.\n")
 
-    study_level = []
-    series_level = []
-
     for index, accession in enumerate(all_items, 1):
         folder = os.path.join(root_path, accession)
-        print(f"[{index}/{total_folders}] Analyzujem zložku: {accession}")
-        if not os.path.isdir(folder): continue
+        print(f"[{index}/{total_folders}] Analyzujem: {accession}")
 
         dumps = [f for f in os.listdir(folder) if f.endswith('.dump')]
         if not dumps: continue
@@ -128,7 +124,6 @@ def process_all_imaging(root_path):
 
         for d in dumps:
             data = parse_dicom_dump(os.path.join(folder, d))
-            # Plnenie štúdie
             if data['modality'] != "N/A": study_info['modalities'].add(data['modality'])
             if data['body_region'] != "N/A": study_info['regions'].add(data['body_region'])
             if data['imaging_procedure'] != "N/A": study_info['procs'].add(data['imaging_procedure'])
@@ -137,14 +132,13 @@ def process_all_imaging(root_path):
             if data['institution'] != "N/A": study_info['insts'].add(data['institution'])
             if not study_info['date'] and data['study_date'] != "N/A": study_info['date'] = data['study_date']
 
-            # Zoskupenie do sérií
             sid = data['series_id']
             if sid not in series_buckets: series_buckets[sid] = []
             series_buckets[sid].append(data)
 
-        # 1. PRÍPRAVA IMAGING STUDY
+        # ZMENENÉ: PRIEBEŽNÁ PRÍPRAVA A ZÁPIS IMAGING STUDY
         sd = study_info['date']
-        study_level.append({
+        study_row = {
             'accession number': accession.replace('#', ''),
             'modalities': ", ".join(sorted(study_info['modalities'])),
             'body region': ", ".join(sorted(study_info['regions'])),
@@ -154,9 +148,19 @@ def process_all_imaging(root_path):
             'dicom series count': len(study_info['uids']),
             'dicom images count': len(dumps),
             'affiliated institution': ", ".join(sorted(study_info['insts']))
-        })
+        }
 
-        # 2. PRÍPRAVA SÉRII
+        # ZMENENÉ: Okamžitý zápis do CSV (mode='a' znamená pripísanie)
+        pd.DataFrame([study_row]).to_csv(
+            'ImagingStudy.csv',
+            mode='a',
+            index=False,
+            sep=';',
+            header=not os.path.exists('ImagingStudy.csv'),
+            encoding='utf-8-sig'
+        )
+
+        # ZMENENÉ: PRIEBEŽNÁ PRÍPRAVA A ZÁPIS SÉRII
         for sid, files in series_buckets.items():
             f = files[0]
             common = {
@@ -173,7 +177,6 @@ def process_all_imaging(root_path):
                 'Compression method': f['compression'], 'Annotations available': f['annotations']
             }
 
-            # Pridanie špecifických podľa modality
             if f['modality'] == 'CT':
                 common.update({'Tube voltage (kVp)': f['kvp'], 'Tube current (mA)': f['ma'],
                                'Exposure time (ms)': f['exposure_time'], 'Spiral pitch factor': f['pitch'],
@@ -190,19 +193,19 @@ def process_all_imaging(root_path):
                 common.update({'Patient orientation': f['orientation'], 'Tube voltage (kVp)': f['kvp'],
                                'Exposure (mAs)': f['mas'], 'Exposure Time (ms)': f['exposure_time']})
 
-            series_level.append(common)
+            # ZMENENÉ: Okamžitý zápis série do CSV (podľa modality)
+            safe_m = str(f['modality']).replace('/', '_').replace('\\', '_')
+            filename = f'Series_{safe_m}.csv'
+            pd.DataFrame([common]).to_csv(
+                filename,
+                mode='a',
+                index=False,
+                sep=';',
+                header=not os.path.exists(filename),
+                encoding='utf-8-sig'
+            )
 
-        # EXPORTY
-        if study_level:
-            pd.DataFrame(study_level).to_excel('ImagingStudy.xlsx', index=False)
-
-        if series_level:
-            df_s = pd.DataFrame(series_level)
-            for m in df_s['modality'].unique():
-                if pd.isna(m) or m == "N/A": continue  # Preskočíme neidentifikované modality
-                df_s[df_s['modality'] == m].dropna(axis=1, how='all').to_excel(f'Series_{m}.xlsx', index=False)
-        else:
-            print("\n[UPOZORNENIE] Nenašli sa žiadne série na export.")
+    print("\nAnalýza dokončená. Všetky dáta boli priebežne uložené do CSV.")
 
 
 # --- SPUSTENIE SKRIPTU ---
