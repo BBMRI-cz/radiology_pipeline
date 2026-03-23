@@ -34,9 +34,7 @@ def parse_dicom_dump(file_path):
     patterns = {
         # Spoločné
         'series_id': r'\(0020,000e\).*?\[(.*?)\]',  # Series Instance UID
-        'modality': r'\(0008,0060\).*?\[(.*?)\]',  # Modality
         'series_date': r'\(0008,0021\).*?\[(.*?)\]',  # Series Date
-        'body_region': r'\(0018,0015\).*?\[(.*?)\]',  # Body Part Examined
         'laterality': r'\(0020,0060\).*?\[(.*?)\]',  # Laterality
         'device': r'\(0008,1090\).*?\[(.*?)\]',  # Manufacturer's Model Name
         'manufacturer': r'\(0008,0070\).*?\[(.*?)\]',  # Manufacturer
@@ -44,15 +42,17 @@ def parse_dicom_dump(file_path):
         'color_space': r'\(0028,0004\).*?\[(.*?)\]',  # Photometric Interpretation
         'pixel_spacing': r'\(0028,0030\).*?\[(.*?)\]',  # Pixel Spacing
         'image_type': r'\(0008,0008\).*?\[(.*?)\]',  # Image Type
-        'width': r'\(0028,0011\).*?\[(.*?)\]',  # Columns
-        'height': r'\(0028,0010\).*?\[(.*?)\]',  # Rows
-        'depth': r'\(0028,0100\).*?\[(.*?)\]',  # Bits Allocated
-        'channels': r'\(0028,0002\).*?\[(.*?)\]',  # Samples per Pixel
-        'channel_res': r'\(0028,0101\).*?\[(.*?)\]',  # Bits Stored
-        'compression': r'\(0002,0010\).*?\[(.*?)\]',  # Transfer Syntax UID
+        'width': r'\(0028,0011\)(?:\s+\w+\s+)([^#\s\r\n]+)',  # Columns
+        'height': r'\(0028,0010\)(?:\s+\w+\s+)([^#\s\r\n]+)',  # Rows
+        'depth': r'\(0028,0100\)(?:\s+\w+\s+)([^#\s\r\n]+)',  # Bits Allocated
+        'channels': r'\(0028,0002\)(?:\s+\w+\s+)([^#\s\r\n]+)',  # Samples per Pixel
+        'channel_res': r'\(0028,0101\)(?:\s+\w+\s+)([^#\s\r\n]+)',  # Bits Stored
+        'compression': r'\(0002,0010\)(?:\s+\w+\s+)([^#\s\r\n]+)',  # Transfer Syntax UID
         'annotations': r'\(0008,103e\).*?\[(.*?)\]',  # Series Description
 
         # Štúdia level tagy
+        'modality': r'\(0008,0060\).*?\[(.*?)\]',  # Modality
+        'body_region': r'\(0018,0015\).*?\[(.*?)\]',  # Body Part Examined
         'imaging_procedure': r'\(0008,1030\).*?\[(.*?)\]',  # Study Description
         'reason': r'\(0040,1002\).*?\[(.*?)\]',  # Reason for the Requested Procedure
         'study_date': r'\(0008,0020\).*?\[(.*?)\]',  # Study Date
@@ -136,10 +136,11 @@ def process_all_imaging(root_path):
             if sid not in series_buckets: series_buckets[sid] = []
             series_buckets[sid].append(data)
 
-        # ZMENENÉ: PRIEBEŽNÁ PRÍPRAVA A ZÁPIS IMAGING STUDY
+        # PRIEBEŽNÁ PRÍPRAVA A ZÁPIS IMAGING STUDY
         sd = study_info['date']
         study_row = {
-            'accession number': accession.replace('#', ''),
+            'imaging study identifier': accession.replace('#', ''),
+            'belongs to person': "",
             'modalities': ", ".join(sorted(study_info['modalities'])),
             'body region': ", ".join(sorted(study_info['regions'])),
             'imaging procedure': ", ".join(sorted(study_info['procs'])),
@@ -150,7 +151,7 @@ def process_all_imaging(root_path):
             'affiliated institution': ", ".join(sorted(study_info['insts']))
         }
 
-        # ZMENENÉ: Okamžitý zápis do CSV (mode='a' znamená pripísanie)
+        # zápis do CSV (mode='a' znamená pripísanie)
         pd.DataFrame([study_row]).to_csv(
             'ImagingStudy.csv',
             mode='a',
@@ -160,38 +161,74 @@ def process_all_imaging(root_path):
             encoding='utf-8-sig'
         )
 
-        # ZMENENÉ: PRIEBEŽNÁ PRÍPRAVA A ZÁPIS SÉRII
+        # PRIEBEŽNÁ PRÍPRAVA A ZÁPIS SÉRII
         for sid, files in series_buckets.items():
             f = files[0]
             common = {
-                'ID serie': sid, 'accession number': accession.replace('#', ''),
-                'modality': f['modality'], 'DICOM images count': len(files),
-                'Series date': f['series_date'], 'Body region': f['body_region'],
-                'Laterality': f['laterality'], 'Imaging device': f['device'],
-                'Manufacturer': f['manufacturer'], 'Software version': f['sw_version'],
-                'Color space': f['color_space'], 'Pixel spacing': f['pixel_spacing'],
-                'Image type': f['image_type'], 'File format': 'DICOM',
-                'File size': f['file_size'], 'Image width': f['width'],
-                'Image height': f['height'], 'Image depth': f['depth'],
-                'Number of channels': f['channels'], 'Channel resolution': f['channel_res'],
-                'Compression method': f['compression'], 'Annotations available': f['annotations']
+                'ID serie': sid,
+                'modality': f['modality'],
+                'imaging study identifier': accession.replace('#', ''),
+                'DICOM images count': len(files),
+                'Series date': f['series_date'],
+                'Body region': f['body_region'],
+                'Laterality': f['laterality'],
+                'Imaging device': f['device'],
+                'Manufacturer': f['manufacturer'],
+                'Software version': f['sw_version'],
+                'Color space': f['color_space'],
+                'Pixel spacing': f['pixel_spacing'],
+                'Image type': f['image_type'],
+                'File format': 'DICOM',
+                'File size': f['file_size'],
+                'Image width': f['width'],
+                'Image height': f['height'],
+                'Image depth': f['depth'],
+                'Number of channels': f['channels'],
+                'Channel resolution': f['channel_res'],
+                'Compression method': f['compression'],
+                'Annotations available': f['annotations']
             }
 
             if f['modality'] == 'CT':
-                common.update({'Tube voltage (kVp)': f['kvp'], 'Tube current (mA)': f['ma'],
-                               'Exposure time (ms)': f['exposure_time'], 'Spiral pitch factor': f['pitch'],
-                               'Filter type': f['filter'], 'Convolution kernel': f['kernel'], 'Field of view': f['fov'],
-                               'Slice thickness': f['thickness'], 'Imaging injection': f['contrast'],
-                               'Z-axis spacing': f['z_spacing']})
+                common.update({
+                    'Tube voltage (kVp)': f['kvp'],
+                    'Tube current (mA)': f['ma'],
+                    'Exposure (mAs)': f['mas'],
+                    'Exposure time (ms)': f['exposure_time'],
+                    'Spiral pitch factor': f['pitch'],
+                    'Filter type': f['filter'],
+                    'Convolution kernel': f['kernel'],
+                    'Field of view': f['fov'],
+                    'Slice thickness': f['thickness'],
+                    'Imaging injection': f['contrast'],
+                    'Z-axis spacing': f['z_spacing'],
+                    'Patient orientation': f['orientation']
+                })
             elif f['modality'] == 'MR':
-                common.update({'Sequence name': f['seq_name'], 'Magnetic field strength': f['mag_field'],
-                               'MR acquisition type': f['acq_type'], 'Repetition time': f['tr'], 'Echo time': f['te'],
-                               'Imaging frequency': f['freq'], 'Flip angle': f['flip'], 'Inversion time': f['ti'],
-                               'Receive coil name': f['coil'], 'Field of view': f['fov'],
-                               'Slice thickness': f['thickness'], 'Imaging injection': f['contrast']})
-            elif f['modality'] == 'DX':
-                common.update({'Patient orientation': f['orientation'], 'Tube voltage (kVp)': f['kvp'],
-                               'Exposure (mAs)': f['mas'], 'Exposure Time (ms)': f['exposure_time']})
+                common.update({
+                    'Sequence name': f['seq_name'],
+                    'Magnetic field strength': f['mag_field'],
+                    'MR acquisition type': f['acq_type'],
+                    'Repetition time': f['tr'],
+                    'Echo time': f['te'],
+                    'Imaging frequency': f['freq'],
+                    'Flip angle': f['flip'],
+                    'Inversion time': f['ti'],
+                    'Receive coil name': f['coil'],
+                    'Field of view': f['fov'],
+                    'Slice thickness': f['thickness'],
+                    'Imaging injection': f['contrast'],
+                    'Patient orientation': f['orientation'],
+                    'Pixel spacing': f['pixel_spacing'],
+                    'Z-axis spacing': f['z_spacing']
+                })
+            elif f['modality'] == 'DX' or f['modality'] == 'CR':
+                common.update({
+                    'Patient orientation': f['orientation'],
+                    'Tube voltage (kVp)': f['kvp'],
+                    'Exposure (mAs)': f['mas'],
+                    'Exposure Time (ms)': f['exposure_time']
+                })
 
             # ZMENENÉ: Okamžitý zápis série do CSV (podľa modality)
             safe_m = str(f['modality']).replace('/', '_').replace('\\', '_')
